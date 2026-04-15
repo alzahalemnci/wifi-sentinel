@@ -119,7 +119,10 @@ check_dns_hijack() {
     # Resolve the same domain via two paths and compare:
     #   @8.8.8.8  bypasses the local DNS and goes straight to Google
     #   (no @)    uses whatever DNS the network assigned us
-    # If results differ, the local DNS is lying — classic hijack indicator.
+    # Large CDNs like Google return different IPs per resolver due to load balancing,
+    # so an exact match is unreliable. Instead we check for zero overlap — if the
+    # local resolver returns at least one IP that also appears in Google's results,
+    # it's load balancing. If the sets are completely disjoint, it's suspicious.
     local via_google via_local
     via_google=$(dig +short +time=3 google.com @8.8.8.8 2>/dev/null | grep -v '^;' | sort | head -5)
     via_local=$(dig +short +time=3 google.com 2>/dev/null | grep -v '^;' | sort | head -5)
@@ -128,12 +131,23 @@ check_dns_hijack() {
     echo "dns_server=$assigned_dns"
     if [[ -z "$via_google" || -z "$via_local" ]]; then
         echo "dns_hijack=unknown"
-    elif [[ "$via_google" != "$via_local" ]]; then
-        echo "dns_hijack=yes"
-        echo "dns_google=$via_google"
-        echo "dns_local=$via_local"
     else
-        echo "dns_hijack=no"
+        # Check if any IP from the local result appears in Google's result set.
+        local overlap=0
+        while IFS= read -r ip; do
+            if echo "$via_google" | grep -qF "$ip"; then
+                overlap=1
+                break
+            fi
+        done <<< "$via_local"
+
+        if [[ "$overlap" -eq 1 ]]; then
+            echo "dns_hijack=no"
+        else
+            echo "dns_hijack=yes"
+            echo "dns_google=$via_google"
+            echo "dns_local=$via_local"
+        fi
     fi
 }
 
