@@ -48,6 +48,15 @@ get_ssid() {
     iwgetid -r 2>/dev/null || echo "UNKNOWN"
 }
 
+get_bssid() {
+    # The BSSID is the MAC address of the wireless access point (the radio).
+    # Unlike the SSID (network name), it is unique per physical AP — two networks
+    # can share an SSID but never a BSSID. Using non-terse nmcli so we don't have
+    # to deal with colon-escaping in the -t output format.
+    nmcli -f ACTIVE,BSSID dev wifi 2>/dev/null | awk '/^yes/ {print $2}' || \
+    iwgetid --ap -r 2>/dev/null || echo "UNKNOWN"
+}
+
 get_gateway() {
     # Reads the kernel routing table and pulls out the default gateway IP.
     ip route show default | awk '/default/ {print $3; exit}'
@@ -80,11 +89,20 @@ oui_lookup() {
 }
 
 is_trusted() {
-    local ssid="$1"
-    # -q  silent (no output, just exit code)
-    # -x  match the whole line exactly (no partial matches)
-    # -F  treat the pattern as a plain string, not a regex
-    [[ -f "$TRUSTED_NETWORKS" ]] && grep -qxF "$ssid" "$TRUSTED_NETWORKS"
+    local ssid="$1" bssid="${2:-}"
+    [[ -f "$TRUSTED_NETWORKS" ]] || return 1
+    # Match SSID-only line (trusts any AP with this name)
+    grep -qxF "$ssid" "$TRUSTED_NETWORKS" && return 0
+    # Match SSID|BSSID line (trusts only this specific AP)
+    [[ -n "$bssid" ]] && grep -qxF "$ssid|$bssid" "$TRUSTED_NETWORKS" && return 0
+    return 1
+}
+
+add_to_trusted() {
+    local ssid="$1" bssid="$2"
+    # Store as SSID|BSSID so this entry is specific to this physical AP.
+    # That way two networks with the same name don't both get trusted.
+    echo "$ssid|$bssid" >> "$TRUSTED_NETWORKS"
 }
 
 detect_captive_portal() {
@@ -142,17 +160,18 @@ score_risk() {
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
-    local ssid
+    local ssid bssid
     ssid=$(get_ssid)
+    bssid=$(get_bssid)
 
     echo ""
     echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYN}  WiFi Sentinel — scanning: $ssid${NC}"
     echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    log "=== Scan start: SSID=$ssid ==="
+    log "=== Scan start: SSID=$ssid BSSID=$bssid ==="
 
     # Skip trusted networks
-    if is_trusted "$ssid"; then
+    if is_trusted "$ssid" "$bssid"; then
         good "Network '$ssid' is in your trusted list. Skipping."
         exit 0
     fi
@@ -284,6 +303,16 @@ main() {
     if (( RISK_SCORE == 0 )); then
         good "Network looks clean. No anomalies detected."
         notify "Clean" "Network '$ssid' passed all checks." normal
+        # Only prompt when running interactively (not via dispatcher).
+        # [ -t 0 ] is true when stdin is a real terminal.
+        if [[ "$bssid" != "UNKNOWN" ]] && [ -t 0 ]; then
+            echo -e -n "\n${CYN}Add '$ssid' to trusted networks? [y/N] ${NC}"
+            read -r response
+            if [[ "$response" =~ ^[Yy]$ ]]; then
+                add_to_trusted "$ssid" "$bssid"
+                good "Added '$ssid' ($bssid) to trusted networks."
+            fi
+        fi
     elif (( RISK_SCORE < 30 )); then
         warn "Low-risk anomalies found on '$ssid':"
         for r in "${RISK_REASONS[@]}"; do echo -e "  ${YEL}•${NC} $r"; done
