@@ -30,16 +30,6 @@ Automatic captive portal and rogue AP detector for Linux. Runs on every WiFi con
 | `notify-send` | `libnotify-bin` | `libnotify` |
 | `nmcli` | `network-manager` | `NetworkManager` |
 
-Install everything at once:
-
-```bash
-# Debian / Ubuntu
-sudo apt-get install -y openssl curl dnsutils nmap libnotify-bin
-
-# Fedora / RHEL
-sudo dnf install -y openssl curl bind-utils nmap libnotify
-```
-
 `nmcli` ships with NetworkManager, which is present on virtually all modern Linux desktops.
 
 ## Installation
@@ -52,8 +42,8 @@ bash install.sh
 
 `install.sh` will:
 1. Install missing dependencies via `apt-get` or `dnf`
-2. Make the scripts executable
-3. Copy `dispatcher.sh` to `/etc/NetworkManager/dispatcher.d/99-wifi-sentinel` so the scan runs automatically on every WiFi connect
+2. Copy the project files to `/opt/wifi-sentinel/`
+3. Install the NetworkManager dispatcher to `/etc/NetworkManager/dispatcher.d/99-wifi-sentinel` so the scan runs automatically on every WiFi connect
 4. (Optional) Download the Wireshark OUI database for offline vendor lookups
 
 ### Manual run
@@ -64,37 +54,32 @@ bash wifi-sentinel.sh
 
 ## Configuration
 
-**Trusted networks** — edit `trusted_networks.txt`, one SSID per line. The sentinel skips these entirely:
+**Trusted networks** — edit `/opt/wifi-sentinel/trusted_networks.txt`, one SSID per line. The sentinel skips these entirely:
 
 ```
 MyHomeWiFi
 WorkNetwork
 ```
 
-**Dispatcher path** — after cloning, open `dispatcher.sh` and update the two variables at the top to match your setup:
-
-```bash
-SENTINEL="/opt/wifi-sentinel/wifi-sentinel.sh"   # path to wifi-sentinel.sh
-USER="your-username"                              # your Linux username
-```
-
 **Desktop notifications** — set `NOTIFY=false` at the top of `wifi-sentinel.sh` to disable them.
 
-**OUI database** — for offline vendor lookups, run `install.sh` or download manually:
+**OUI database** — `install.sh` downloads this automatically. To refresh it manually after install:
 
 ```bash
-curl -o oui.txt https://www.wireshark.org/download/automated/data/manuf
+sudo curl -o /opt/wifi-sentinel/oui.txt https://www.wireshark.org/download/automated/data/manuf
 ```
 
 `oui.txt` is gitignored — it's ~10 MB and user-generated.
 
 ## Log file
 
-All scan results are written to `sentinel.log` in the project directory (also gitignored). Tail it live with:
+All scan results are written to `/opt/wifi-sentinel/sentinel.log`. Tail it live with:
 
 ```bash
-tail -f sentinel.log
+tail -f /opt/wifi-sentinel/sentinel.log
 ```
+
+When running manually from the clone directory (before install), logs go to `sentinel.log` in that directory instead.
 
 ## Captive portal investigation
 
