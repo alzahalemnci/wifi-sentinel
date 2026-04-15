@@ -46,6 +46,16 @@ bash install.sh
 3. Install the NetworkManager dispatcher to `/etc/NetworkManager/dispatcher.d/99-wifi-sentinel` so the scan runs automatically on every WiFi connect
 4. (Optional) Download the Wireshark OUI database for offline vendor lookups
 
+### Updating
+
+Pull the latest changes and re-run `install.sh` — it overwrites the installed files in place:
+
+```bash
+cd wifi-sentinel
+git pull
+sudo bash install.sh
+```
+
 ### Manual run
 
 ```bash
