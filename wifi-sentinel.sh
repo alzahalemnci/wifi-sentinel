@@ -116,38 +116,22 @@ check_dns_hijack() {
     assigned_dns=$(resolvectl status 2>/dev/null | grep 'DNS Servers' | awk '{print $3}' | head -1)
     [[ -z "$assigned_dns" ]] && assigned_dns=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
 
-    # Resolve the same domain via two paths and compare:
-    #   @8.8.8.8  bypasses the local DNS and goes straight to Google
-    #   (no @)    uses whatever DNS the network assigned us
-    # Large CDNs like Google return different IPs per resolver due to load balancing,
-    # so an exact match is unreliable. Instead we check for zero overlap — if the
-    # local resolver returns at least one IP that also appears in Google's results,
-    # it's load balancing. If the sets are completely disjoint, it's suspicious.
-    local via_google via_local
-    via_google=$(dig +short +time=3 google.com @8.8.8.8 2>/dev/null | grep -v '^;' | sort | head -5)
-    via_local=$(dig +short +time=3 google.com 2>/dev/null | grep -v '^;' | sort | head -5)
+    # NXDOMAIN test: query a random domain that is guaranteed not to exist.
+    # A legitimate DNS returns no answer (NXDOMAIN); a hijacking DNS returns an IP
+    # so it can redirect you to a search/ad page. This avoids false positives from
+    # CDN load balancing, where the same domain legitimately resolves to different
+    # IPs depending on which resolver you ask.
+    local canary="wifi-sentinel-canary-$(date +%s).invalid"
+    local hijack_result
+    hijack_result=$(dig +short +time=3 "$canary" 2>/dev/null | grep -v '^;' || true)
 
-    # Output as key=value lines so the caller can parse them with grep/cut.
     echo "dns_server=$assigned_dns"
-    if [[ -z "$via_google" || -z "$via_local" ]]; then
-        echo "dns_hijack=unknown"
+    if [[ -n "$hijack_result" ]]; then
+        # Got an IP back for a non-existent domain — local DNS is redirecting queries.
+        echo "dns_hijack=yes"
+        echo "dns_redirect=$hijack_result"
     else
-        # Check if any IP from the local result appears in Google's result set.
-        local overlap=0
-        while IFS= read -r ip; do
-            if echo "$via_google" | grep -qF "$ip"; then
-                overlap=1
-                break
-            fi
-        done <<< "$via_local"
-
-        if [[ "$overlap" -eq 1 ]]; then
-            echo "dns_hijack=no"
-        else
-            echo "dns_hijack=yes"
-            echo "dns_google=$via_google"
-            echo "dns_local=$via_local"
-        fi
+        echo "dns_hijack=no"
     fi
 }
 
@@ -279,7 +263,7 @@ main() {
 
     case "$dns_hijack" in
         yes)
-            alert "DNS HIJACKING DETECTED — local DNS results differ from 8.8.8.8"
+            alert "DNS HIJACKING DETECTED — local DNS is returning results for non-existent domains"
             RISK_SCORE=$((RISK_SCORE + 50))
             RISK_REASONS+=("DNS hijacking detected")
             ;;
