@@ -1,0 +1,6 @@
+# One SSID per line — sentinel will skip these networks entirely
+# Example:
+# MyHomeWiFi
+# MyPhone Hotspot
+# MyHomeWiFi
+# WorkNetwork
