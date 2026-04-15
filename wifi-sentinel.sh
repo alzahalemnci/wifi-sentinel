@@ -2,9 +2,14 @@
 # wifi-sentinel.sh — Automatic captive portal & rogue AP detector
 # Runs on connect to any network not in your trusted list.
 
+# -e  exit on any error
+# -u  treat unset variables as errors
+# -o pipefail  if any command in a pipe fails, the whole pipe fails
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
+# BASH_SOURCE[0] is this script's path even when called via symlink or sourced.
+# The cd/pwd pattern resolves it to an absolute path regardless of where you run from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRUSTED_NETWORKS="$SCRIPT_DIR/trusted_networks.txt"
 LOG_FILE="$SCRIPT_DIR/sentinel.log"
@@ -12,12 +17,14 @@ OUI_DB="$SCRIPT_DIR/oui.txt"           # optional local OUI db (see README)
 NOTIFY=true                             # set false to disable desktop notifications
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ANSI escape codes for terminal colours. NC = No Colour (reset).
 RED='\033[0;31m'
 YEL='\033[1;33m'
 GRN='\033[0;32m'
 CYN='\033[0;36m'
 NC='\033[0m'
 
+# tee -a writes to stdout AND appends to the log file at the same time.
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 info()  { echo -e "${CYN}[INFO]${NC}  $*"; log "INFO  $*"; }
 warn()  { echo -e "${YEL}[WARN]${NC}  $*"; log "WARN  $*"; }
@@ -26,33 +33,42 @@ good()  { echo -e "${GRN}[OK]${NC}    $*"; log "OK    $*"; }
 
 notify() {
     local title="$1" body="$2" urgency="${3:-normal}"
+    # Only fire if NOTIFY=true AND notify-send is actually installed.
+    # The trailing '|| true' prevents set -e from aborting if notify-send fails.
     $NOTIFY && command -v notify-send &>/dev/null && \
         notify-send -u "$urgency" -i network-wireless "WiFi Sentinel: $title" "$body" || true
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 get_ssid() {
+    # nmcli -t outputs terse (machine-readable) lines: "yes:MyNetwork"
+    # grep '^yes' picks the active connection, cut extracts the SSID after the colon.
+    # iwgetid is a fallback for systems without NetworkManager.
     nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2 || \
     iwgetid -r 2>/dev/null || echo "UNKNOWN"
 }
 
 get_gateway() {
+    # Reads the kernel routing table and pulls out the default gateway IP.
     ip route show default | awk '/default/ {print $3; exit}'
 }
 
 get_gateway_mac() {
     local gw="$1"
-    # Ping once to populate ARP cache, then read it
+    # The ARP cache is only populated after traffic reaches the gateway.
+    # One ping ensures it's there before we try to read it.
     ping -c1 -W1 "$gw" &>/dev/null || true
+    # 'ip neigh' shows the ARP table; field 5 is the MAC address.
     ip neigh show "$gw" 2>/dev/null | awk '{print $5}' | head -1
 }
 
 oui_lookup() {
-    local mac="${1^^}"  # uppercase
-    local oui="${mac:0:8}"  # first 3 octets XX:XX:XX
+    local mac="${1^^}"      # ^^ converts the string to uppercase
+    local oui="${mac:0:8}"  # slice the first 8 characters = XX:XX:XX (3 octets)
 
     # Try local DB first (faster, offline)
     if [[ -f "$OUI_DB" ]]; then
+        # The Wireshark manuf file uses dashes (AA-BB-CC), so replace colons.
         local normalized="${oui//:/-}"
         grep -i "^$normalized" "$OUI_DB" | head -1 | cut -f3 || true
     fi
@@ -65,11 +81,16 @@ oui_lookup() {
 
 is_trusted() {
     local ssid="$1"
+    # -q  silent (no output, just exit code)
+    # -x  match the whole line exactly (no partial matches)
+    # -F  treat the pattern as a plain string, not a regex
     [[ -f "$TRUSTED_NETWORKS" ]] && grep -qxF "$ssid" "$TRUSTED_NETWORKS"
 }
 
 detect_captive_portal() {
-    # Returns the redirect URL if a captive portal is detected, empty otherwise
+    # Google's generate_204 endpoint normally returns HTTP 204 (no content).
+    # If a captive portal intercepts the request it returns a redirect instead.
+    # -w '%{redirect_url}' prints that redirect URL; if there's no redirect it's empty.
     local redirect
     redirect=$(curl -sf --max-time 5 -o /dev/null -w '%{redirect_url}' \
         http://connectivitycheck.gstatic.com/generate_204 2>/dev/null || true)
@@ -78,22 +99,32 @@ detect_captive_portal() {
 
 check_cert() {
     local host="$1"
-    local port="${2:-443}"
-    # Returns cert info as key=value lines
+    local port="${2:-443}"  # default to 443 if no port given
+    # Two openssl commands piped together:
+    #   s_client  opens a TLS connection and dumps the raw certificate
+    #   x509      parses the cert and prints the requested fields
+    # 'echo |' provides the empty input s_client needs to not hang waiting for stdin.
+    # 'timeout 5' kills it if the host doesn't respond within 5 seconds.
     echo | timeout 5 openssl s_client -connect "$host:$port" -servername "$host" \
         2>/dev/null | openssl x509 -noout \
         -subject -issuer -dates -fingerprint 2>/dev/null || true
 }
 
 check_dns_hijack() {
+    # Try systemd-resolved first, fall back to /etc/resolv.conf.
     local assigned_dns
     assigned_dns=$(resolvectl status 2>/dev/null | grep 'DNS Servers' | awk '{print $3}' | head -1)
     [[ -z "$assigned_dns" ]] && assigned_dns=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
 
+    # Resolve the same domain via two paths and compare:
+    #   @8.8.8.8  bypasses the local DNS and goes straight to Google
+    #   (no @)    uses whatever DNS the network assigned us
+    # If results differ, the local DNS is lying — classic hijack indicator.
     local via_google via_local
     via_google=$(dig +short +time=3 google.com @8.8.8.8 2>/dev/null | grep -v '^;' | sort | head -5)
     via_local=$(dig +short +time=3 google.com 2>/dev/null | grep -v '^;' | sort | head -5)
 
+    # Output as key=value lines so the caller can parse them with grep/cut.
     echo "dns_server=$assigned_dns"
     if [[ -z "$via_google" || -z "$via_local" ]]; then
         echo "dns_hijack=unknown"
@@ -107,7 +138,7 @@ check_dns_hijack() {
 }
 
 score_risk() {
-    # Accumulates a numeric risk score and returns it
+    # Simple getter — RISK_SCORE is built up throughout main() via (( RISK_SCORE += N ))
     echo "$RISK_SCORE"
 }
 
@@ -129,7 +160,7 @@ main() {
     fi
 
     RISK_SCORE=0
-    RISK_REASONS=()
+    RISK_REASONS=()  # array — entries are appended with +=("reason text")
 
     # ── Gateway & MAC ─────────────────────────────────────────────────────────
     local gateway mac vendor
@@ -141,7 +172,7 @@ main() {
     info "Gateway: $gateway"
 
     mac=$(get_gateway_mac "$gateway")
-    info "Gateway MAC: ${mac:-not found}"
+    info "Gateway MAC: ${mac:-not found}"  # ${var:-fallback} prints fallback if var is empty
 
     if [[ -n "$mac" ]]; then
         vendor=$(oui_lookup "$mac")
@@ -161,6 +192,8 @@ main() {
 
     if [[ -n "$portal_url" ]]; then
         info "Captive portal detected: $portal_url"
+        # Parse just the hostname out of the URL (strip scheme and path).
+        # awk splits on '/' to get the host:port part, cut drops any port number.
         local portal_host
         portal_host=$(echo "$portal_url" | awk -F/ '{print $3}' | cut -d: -f1)
 
@@ -183,7 +216,7 @@ main() {
             info "Issuer  : $issuer"
             info "Expires : $not_after"
 
-            # Self-signed: issuer == subject
+            # A self-signed cert has no separate CA — the subject signed itself.
             if [[ "$subject" == "$issuer" ]]; then
                 warn "Certificate is SELF-SIGNED"
                 RISK_SCORE=$((RISK_SCORE + 30))
@@ -192,16 +225,17 @@ main() {
                 good "Certificate has a distinct issuer (not self-signed)"
             fi
 
-            # Cert issued to raw IP
+            # Legitimate TLS certs are issued to domain names, not raw IPs.
             if echo "$subject" | grep -qE 'CN=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'; then
                 warn "Certificate issued to a raw IP address"
                 RISK_SCORE=$((RISK_SCORE + 25))
                 RISK_REASONS+=("Cert CN is a raw IP")
             fi
 
-            # Expired
+            # Convert the cert's expiry string to a Unix timestamp and compare to now.
             if [[ -n "$not_after" ]]; then
                 local expiry_epoch now_epoch
+                # 'date -d' is GNU/Linux syntax; the second form is macOS/BSD fallback.
                 expiry_epoch=$(date -d "$not_after" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$not_after" +%s 2>/dev/null || echo 0)
                 now_epoch=$(date +%s)
                 if (( expiry_epoch > 0 && expiry_epoch < now_epoch )); then
@@ -222,6 +256,7 @@ main() {
     local dns_result
     dns_result=$(check_dns_hijack)
 
+    # Parse the key=value output from check_dns_hijack
     local dns_server dns_hijack
     dns_server=$(echo "$dns_result" | grep dns_server | cut -d= -f2)
     dns_hijack=$(echo "$dns_result" | grep dns_hijack | cut -d= -f2)
