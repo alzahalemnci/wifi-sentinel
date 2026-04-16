@@ -104,14 +104,15 @@ main() {
     fi
 
     # ── Silent scan logic ─────────────────────────────────────────────────────
-    # In dispatcher mode, suppress desktop notifications when the score hasn't
-    # increased since last visit — no point waking the user for a known baseline.
-    # First-time scans (no history) and any score increase always notify.
+    # In dispatcher mode, suppress notifications only when the network scores 0
+    # and has scored 0 before — genuinely clean and already seen.
+    # Any score > 0 always notifies, regardless of history, so untrusted networks
+    # (e.g. a coffee shop) keep alerting until explicitly added to the trusted list.
     # Terminal mode always shows full output regardless.
     local should_notify=true
-    if [[ ! -t 0 && -n "$last_score" && "$RISK_SCORE" -le "$last_score" ]]; then
+    if [[ ! -t 0 && "$RISK_SCORE" -eq 0 && -n "$last_score" ]]; then
         should_notify=false
-        log "Silent scan — score=$RISK_SCORE last=$last_score — no change, notification suppressed"
+        log "Silent scan — score=0, previously clean — notification suppressed"
     fi
 
     # ── Verdict ───────────────────────────────────────────────────────────────

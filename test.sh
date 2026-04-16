@@ -313,9 +313,9 @@ test_silent_scan() {
         return 0
     fi
 
-    # Seed history with a high score so current score (0 with mocked clean checks)
-    # is lower — should trigger silent scan.
-    echo "$ssid|$bssid|$(date +%s)|99" > "$HISTORY_TEST"
+    # Seed history with score=0. Mock all checks clean so current scan also scores 0
+    # — should trigger silent suppression.
+    echo "$ssid|$bssid|$(date +%s)|0" > "$HISTORY_TEST"
 
     nmap() { echo ""; }
     export -f nmap
@@ -323,11 +323,19 @@ test_silent_scan() {
         [[ "$*" == *"+dnssec"* ]] && echo ";; flags: qr rd ra ad;" || command dig "$@"
     }
     export -f dig
+    # Return a single AP for the evil twin check so the mesh doesn't score +15.
+    # Pass all other nmcli calls through unchanged.
+    export MOCK_SSID="$ssid" MOCK_BSSID="$bssid"
+    nmcli() {
+        [[ "$*" == *"SSID,BSSID"* ]] && echo "$MOCK_SSID  $MOCK_BSSID" || command nmcli "$@"
+    }
+    export -f nmcli
 
     local output
     output=$(SCORE_HISTORY="$HISTORY_TEST" bash "$SENTINEL" 2>&1) || true
     unset -f nmap
     unset -f dig
+    unset -f nmcli
 
     if echo "$output" | grep -q "notification suppressed"; then
         pass "Silent scan correctly suppressed notification on unchanged score"
@@ -338,21 +346,24 @@ test_silent_scan() {
     fi
 }
 
-# ── Test: silent scan breaks on score increase ────────────────────────────────
-test_silent_scan_breaks_on_increase() {
+# ── Test: silent scan does not suppress when score > 0 ───────────────────────
+# Covers both: score increased from 0, AND score unchanged but still > 0
+# (e.g. a coffee shop that always scores 30 — should always notify until trusted)
+test_silent_scan_notifies_on_risk() {
     local ssid bssid
     ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2 || echo "UNKNOWN")
     bssid=$(nmcli -f ACTIVE,BSSID dev wifi 2>/dev/null | awk '/^yes/ {print $2}' || echo "UNKNOWN")
 
     if [[ "$ssid" == "UNKNOWN" || "$bssid" == "UNKNOWN" ]]; then
-        skip "Not connected to WiFi — cannot test silent scan break"
+        skip "Not connected to WiFi — cannot test silent scan with risk"
         TESTS_SKIPPED=$(( TESTS_SKIPPED + 1 ))
         TESTS_RUN=$(( TESTS_RUN - 1 ))
         return 0
     fi
 
-    # Seed history with score=0 — current scan will score >0 via telnet mock.
-    echo "$ssid|$bssid|$(date +%s)|0" > "$HISTORY_TEST"
+    # Seed history with score=30 — same as what the mock will produce.
+    # Score is unchanged but > 0, so notification must still fire.
+    echo "$ssid|$bssid|$(date +%s)|30" > "$HISTORY_TEST"
 
     nmap() { echo "23/tcp open  telnet"; }
     export -f nmap
@@ -361,13 +372,12 @@ test_silent_scan_breaks_on_increase() {
     output=$(SCORE_HISTORY="$HISTORY_TEST" bash "$SENTINEL" 2>&1) || true
     unset -f nmap
 
-    # Notification suppression message must NOT appear — score increased so notify.
     if echo "$output" | grep -q "notification suppressed"; then
-        fail "Silent scan incorrectly suppressed notification on score increase"
+        fail "Silent scan incorrectly suppressed notification on risk score > 0"
         echo "$output"
         return 1
     else
-        pass "Silent scan correctly notifies when score increases"
+        pass "Silent scan correctly notifies when score > 0 (even if unchanged)"
     fi
 }
 
@@ -385,8 +395,8 @@ run_test "Gateway suspicious port scan"      test_gateway_port_scan
 run_test "HTTPS downgrade detection"         test_https_downgrade
 run_test "DNSSEC validation"                 test_dnssec
 run_test "Score history escalation"          test_score_history
-run_test "Silent scan (no change)"           test_silent_scan
-run_test "Silent scan breaks on increase"    test_silent_scan_breaks_on_increase
+run_test "Silent scan (score 0, no change)"  test_silent_scan
+run_test "Silent scan notifies on risk > 0"  test_silent_scan_notifies_on_risk
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
