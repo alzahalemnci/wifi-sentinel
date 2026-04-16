@@ -89,6 +89,7 @@ main() {
     check_https_downgrade
     check_portal
     check_dns
+    check_dnssec
 
     # ── Verdict ───────────────────────────────────────────────────────────────
     echo ""

@@ -154,14 +154,24 @@ test_dns_hijack() {
 
 # ── Test: clean network scores 0 ─────────────────────────────────────────────
 test_clean_scan() {
-    # Mock nmap to return no open ports so the score is deterministic regardless
-    # of what services are actually running on the test machine's gateway.
+    # Mock nmap and dig to give deterministic results regardless of the real
+    # network state: no suspicious ports, and a resolver that validates DNSSEC.
     nmap() { echo ""; }
     export -f nmap
+    dig() {
+        local args="$*"
+        if [[ "$args" == *"+dnssec"* ]]; then
+            echo ";; flags: qr rd ra ad; QUERY: 1, ANSWER: 1"
+        else
+            command dig "$@"
+        fi
+    }
+    export -f dig
 
     local output
     output=$(bash "$SENTINEL" 2>&1) || true
     unset -f nmap
+    unset -f dig
 
     if echo "$output" | grep -q "score=0"; then
         pass "Clean network scores 0"
@@ -226,6 +236,35 @@ test_https_downgrade() {
     fi
 }
 
+# ── Test: DNSSEC not validated ────────────────────────────────────────────────
+test_dnssec() {
+    # Mock dig to return a response without the AD flag, simulating a resolver
+    # that does not perform DNSSEC validation (or a rogue resolver stripping it).
+    # Only intercept the DNSSEC query — pass canary/hijack queries through so
+    # check_dns still runs cleanly.
+    dig() {
+        local args="$*"
+        if [[ "$args" == *"+dnssec"* ]]; then
+            echo ";; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1"
+        else
+            command dig "$@"
+        fi
+    }
+    export -f dig
+
+    local output
+    output=$(bash "$SENTINEL" 2>&1) || true
+    unset -f dig
+
+    if echo "$output" | grep -q "DNSSEC not validated"; then
+        pass "DNSSEC missing AD flag correctly detected"
+    else
+        fail "Expected DNSSEC warning not found"
+        echo "$output"
+        return 1
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -238,6 +277,7 @@ run_test "Gateway MAC change alert"     test_gateway_mac_change
 run_test "DNS hijacking detection"      test_dns_hijack
 run_test "Gateway suspicious port scan" test_gateway_port_scan
 run_test "HTTPS downgrade detection"    test_https_downgrade
+run_test "DNSSEC validation"            test_dnssec
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
