@@ -95,27 +95,37 @@ main() {
     echo -e "${CYN}  VERDICT — Risk Score: $RISK_SCORE / 100${NC}"
     echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
+    # _trust_from_notification fires an interactive notification with an
+    # "Add to Trusted" button. If clicked, adds the network to the trusted list.
+    # Used for all score levels in the dispatcher path so the user always has the
+    # option to trust regardless of score.
+    _trust_from_notification() {
+        local title="$1" body="$2" urgency="${3:-normal}"
+        local action
+        action=$(notify_interactive "$title" "$body" "$urgency")
+        if [[ "$action" == "trust" && "$bssid" != "UNKNOWN" ]]; then
+            add_to_trusted "$ssid" "$bssid" "${GATEWAY_MAC:-}"
+            log "User trusted '$ssid' ($bssid) via notification (score=$RISK_SCORE)."
+        fi
+    }
+
     if (( RISK_SCORE == 0 )); then
         good "Network looks clean. No anomalies detected."
         if [[ "$bssid" != "UNKNOWN" ]]; then
             if [ -t 0 ]; then
-                # Interactive (manual run): ask before trusting.
+                # Interactive (manual run): use terminal prompt.
                 echo -e -n "\n${CYN}Add '$ssid' to trusted networks? [y/N] ${NC}"
                 read -r response
                 if [[ "$response" =~ ^[Yy]$ ]]; then
                     add_to_trusted "$ssid" "$bssid" "${GATEWAY_MAC:-}"
                     good "Added '$ssid' ($bssid) to trusted networks."
-                    notify "Clean — Trusted" "Network '$ssid' passed all checks and was added to trusted list." normal
+                    notify "Clean — Trusted" "Network '$ssid' passed all checks." normal
                 else
                     notify "Clean" "Network '$ssid' passed all checks." normal
                 fi
-            elif [[ "$AUTO_TRUST" == "true" ]]; then
-                # Dispatcher (no terminal): auto-trust if enabled in sentinel.conf.
-                add_to_trusted "$ssid" "$bssid" "${GATEWAY_MAC:-}"
-                log "Auto-trusted '$ssid' ($bssid) after clean scan."
-                notify "Clean — Trusted" "Network '$ssid' passed all checks and was added to trusted list." normal
             else
-                notify "Clean" "Network '$ssid' passed all checks." normal
+                # Dispatcher: offer trust button on the notification.
+                _trust_from_notification "Clean ✓" "Score 0 — Network '$ssid' passed all checks." normal
             fi
         else
             notify "Clean" "Network '$ssid' passed all checks." normal
@@ -124,17 +134,17 @@ main() {
         warn "Low-risk anomalies found on '$ssid':"
         for r in "${RISK_REASONS[@]}"; do echo -e "  ${YEL}•${NC} $r"; done
         warn "Probably lazy IT. Avoid sending sensitive data without a VPN."
-        notify "Low Risk" "$ssid — ${RISK_REASONS[*]}" normal
+        _trust_from_notification "Low Risk" "Score $RISK_SCORE — $ssid — ${RISK_REASONS[*]}" normal
     elif (( RISK_SCORE < 60 )); then
         alert "Moderate risk on '$ssid':"
         for r in "${RISK_REASONS[@]}"; do echo -e "  ${RED}•${NC} $r"; done
         alert "Use a VPN. Do not log in to anything on this network."
-        notify "Moderate Risk" "$ssid — ${RISK_REASONS[*]}" critical
+        _trust_from_notification "Moderate Risk ⚠" "Score $RISK_SCORE — $ssid — ${RISK_REASONS[*]}" critical
     else
         alert "HIGH RISK — possible rogue AP / evil twin on '$ssid':"
         for r in "${RISK_REASONS[@]}"; do echo -e "  ${RED}•${NC} $r"; done
         alert "DISCONNECT IMMEDIATELY. Use mobile data."
-        notify "HIGH RISK — DISCONNECT" "$ssid — ${RISK_REASONS[*]}" critical
+        _trust_from_notification "HIGH RISK ✗" "Score $RISK_SCORE — $ssid — ${RISK_REASONS[*]}" critical
     fi
 
     echo ""

@@ -23,3 +23,16 @@ notify() {
     $NOTIFY && command -v notify-send &>/dev/null && \
         notify-send -u "$urgency" -i network-wireless "WiFi Sentinel: $title" "$body" || true
 }
+
+notify_interactive() {
+    local title="$1" body="$2" urgency="${3:-normal}"
+    $NOTIFY && command -v notify-send &>/dev/null || { echo ""; return; }
+    # --wait blocks until the notification is dismissed or an action is clicked.
+    # --action adds a button; notify-send prints the action ID ("trust") if clicked,
+    # or an empty string if the notification is dismissed without clicking.
+    notify-send --wait \
+        -u "$urgency" \
+        -i network-wireless \
+        --action="trust=Add to Trusted" \
+        "WiFi Sentinel: $title" "$body" 2>/dev/null || echo ""
+}
