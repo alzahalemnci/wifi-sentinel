@@ -15,9 +15,9 @@ TRUSTED_NETWORKS="$SCRIPT_DIR/trusted_networks.txt"
 LOG_FILE="$SCRIPT_DIR/sentinel.log"
 OUI_DB="$SCRIPT_DIR/oui.txt"   # optional local OUI db (see README)
 
-# ── Defaults (overridden by sentinel.conf) ────────────────────────────────────
-NOTIFY=true
-AUTO_TRUST=true
+# ── Defaults (overridden by sentinel.conf, or by environment for testing) ────
+NOTIFY=${NOTIFY:-true}
+AUTO_TRUST=${AUTO_TRUST:-true}
 
 # ── Load config and modules ───────────────────────────────────────────────────
 [[ -f "$SCRIPT_DIR/sentinel.conf" ]] && source "$SCRIPT_DIR/sentinel.conf"
