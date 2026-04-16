@@ -86,6 +86,7 @@ main() {
     check_gateway || exit 1   # fatal if no gateway — nothing else can run
     check_evil_twin "$ssid"
     check_tls_pinning
+    check_https_downgrade
     check_portal
     check_dns
 

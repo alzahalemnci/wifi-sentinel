@@ -198,6 +198,34 @@ test_gateway_port_scan() {
     fi
 }
 
+# ── Test: HTTPS downgrade detection ──────────────────────────────────────────
+test_https_downgrade() {
+    # Mock curl to simulate a MITM serving 200 OK over plain HTTP instead of
+    # redirecting to HTTPS. Only intercept the HEAD request to google.com —
+    # pass everything else through to avoid breaking other checks.
+    curl() {
+        local args="$*"
+        if [[ "$args" == *"google.com"* ]]; then
+            echo "HTTP/1.1 200 OK"
+        else
+            command curl "$@"
+        fi
+    }
+    export -f curl
+
+    local output
+    output=$(bash "$SENTINEL" 2>&1) || true
+    unset -f curl
+
+    if echo "$output" | grep -q "HTTPS DOWNGRADE DETECTED"; then
+        pass "HTTPS downgrade correctly detected"
+    else
+        fail "Expected HTTPS downgrade alert not found"
+        echo "$output"
+        return 1
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -209,6 +237,7 @@ run_test "Trusted network skip"         test_trusted_skip
 run_test "Gateway MAC change alert"     test_gateway_mac_change
 run_test "DNS hijacking detection"      test_dns_hijack
 run_test "Gateway suspicious port scan" test_gateway_port_scan
+run_test "HTTPS downgrade detection"    test_https_downgrade
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

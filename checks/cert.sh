@@ -55,6 +55,43 @@ check_tls_pinning() {
     esac
 }
 
+# Public entry point — checks whether plain HTTP requests to a known HTTPS site
+# are served unencrypted instead of being redirected to HTTPS.
+# A legitimate network returns HTTP 301/302 → https://. A MITM stripping TLS
+# intercepts the connection and serves a 200 directly over HTTP so it can read
+# and modify traffic before re-encrypting it toward the real server.
+check_https_downgrade() {
+    info "Checking for HTTPS downgrade attack ..."
+
+    if ! command -v curl &>/dev/null; then
+        warn "curl not found — skipping HTTPS downgrade check"
+        return
+    fi
+
+    # -s silent, -I head-only, -L do NOT follow redirects (we want the raw response)
+    # --max-time 5 prevents hanging on a captive portal that never responds
+    local http_code
+    http_code=$(curl -sI --max-time 5 --no-location http://google.com 2>/dev/null \
+        | grep -i "^HTTP/" | awk '{print $2}' | head -1 || true)
+
+    case "$http_code" in
+        301|302|307|308)
+            good "HTTP → HTTPS redirect in place (status $http_code) — no downgrade detected"
+            ;;
+        200)
+            alert "HTTPS DOWNGRADE DETECTED — http://google.com served 200 OK without redirecting to HTTPS"
+            RISK_SCORE=$((RISK_SCORE + 40))
+            RISK_REASONS+=("HTTPS downgrade — HTTP request served without TLS redirect")
+            ;;
+        "")
+            warn "HTTPS downgrade check skipped — could not reach google.com"
+            ;;
+        *)
+            warn "HTTPS downgrade check — unexpected status code: $http_code"
+            ;;
+    esac
+}
+
 # Public entry point — called by the main orchestrator.
 check_portal() {
     local portal_url

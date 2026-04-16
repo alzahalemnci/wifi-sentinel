@@ -19,6 +19,7 @@ Tests restore all state on exit (trusted_networks.txt, resolv.conf, background p
 | Gateway MAC change | Inject wrong MAC into trusted_networks.txt | Yes |
 | DNS hijacking | Bash function mock via `export -f dig` | Yes |
 | Gateway port fingerprint | Bash function mock via `export -f nmap` returning telnet | Yes |
+| HTTPS downgrade detection | Bash function mock via `export -f curl` returning 200 OK | Yes |
 
 ---
 
