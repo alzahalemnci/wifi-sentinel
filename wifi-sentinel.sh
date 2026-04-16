@@ -11,7 +11,8 @@ set -euo pipefail
 # BASH_SOURCE[0] is this script's path even when called via symlink or sourced.
 # The cd/pwd pattern resolves it to an absolute path regardless of where you run from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TRUSTED_NETWORKS="$SCRIPT_DIR/trusted_networks.txt"
+TRUSTED_NETWORKS="${TRUSTED_NETWORKS:-$SCRIPT_DIR/trusted_networks.txt}"
+SCORE_HISTORY="${SCORE_HISTORY:-$SCRIPT_DIR/score_history.txt}"
 LOG_FILE="$SCRIPT_DIR/sentinel.log"
 OUI_DB="$SCRIPT_DIR/oui.txt"   # optional local OUI db (see README)
 
@@ -90,6 +91,17 @@ main() {
     check_portal
     check_dns
     check_dnssec
+
+    # ── Score history escalation ──────────────────────────────────────────────
+    # Record raw score before escalation so history reflects actual check results.
+    local last_score
+    last_score=$(get_last_score "$ssid" "$bssid")
+    record_score "$ssid" "$bssid" "$RISK_SCORE"
+    if [[ -n "$last_score" && "$last_score" == "0" && "$RISK_SCORE" -gt 0 ]]; then
+        warn "Previously clean network now shows anomalies (last score: 0, current: $RISK_SCORE)"
+        RISK_SCORE=$((RISK_SCORE + 20))
+        RISK_REASONS+=("Previously clean — new anomalies detected since last visit")
+    fi
 
     # ── Verdict ───────────────────────────────────────────────────────────────
     echo ""

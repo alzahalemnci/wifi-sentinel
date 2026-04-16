@@ -47,10 +47,14 @@ fi
 sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/trusted_networks.txt"
 sudo chmod 664 "$INSTALL_DIR/trusted_networks.txt"
 
-# sentinel.log — pre-create so the user can write to it without root
+# sentinel.log and score_history.txt — pre-create so the user can write without root
 sudo touch "$INSTALL_DIR/sentinel.log"
 sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/sentinel.log"
 sudo chmod 664 "$INSTALL_DIR/sentinel.log"
+
+sudo touch "$INSTALL_DIR/score_history.txt"
+sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/score_history.txt"
+sudo chmod 664 "$INSTALL_DIR/score_history.txt"
 
 echo "[3/4] Installing NetworkManager dispatcher..."
 sudo sed \

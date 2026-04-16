@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# lib/trust.sh — trusted network management
-# Sourced by wifi-sentinel.sh. Expects TRUSTED_NETWORKS to be set.
+# lib/trust.sh — trusted network management and score history
+# Sourced by wifi-sentinel.sh. Expects TRUSTED_NETWORKS and SCORE_HISTORY to be set.
 #
 # trusted_networks.txt format (one entry per line):
 #   SSID                        — trust any AP with this name
 #   SSID|BSSID                  — trust only this specific AP (legacy)
 #   SSID|BSSID|GATEWAY_MAC      — trust this AP and record its gateway MAC for change detection
+#
+# score_history.txt format (one entry per scan):
+#   SSID|BSSID|EPOCH|SCORE
 
 is_trusted() {
     local ssid="$1" bssid="${2:-}"
@@ -35,4 +38,19 @@ add_to_trusted() {
     else
         echo "$ssid|$bssid" >> "$TRUSTED_NETWORKS"
     fi
+}
+
+# Returns the score from the most recent scan of this SSID|BSSID, or empty if
+# no history exists yet.
+get_last_score() {
+    local ssid="$1" bssid="$2"
+    [[ -f "$SCORE_HISTORY" ]] || return 0
+    awk -F'|' -v s="$ssid" -v b="$bssid" '$1==s && $2==b {last=$4} END {print last}' \
+        "$SCORE_HISTORY" 2>/dev/null || true
+}
+
+# Appends the current scan result to score_history.txt.
+record_score() {
+    local ssid="$1" bssid="$2" score="$3"
+    echo "$ssid|$bssid|$(date +%s)|$score" >> "$SCORE_HISTORY"
 }

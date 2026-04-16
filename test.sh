@@ -13,6 +13,7 @@ SENTINEL="$SCRIPT_DIR/wifi-sentinel.sh"
 TRUSTED="$SCRIPT_DIR/trusted_networks.txt"
 TRUSTED_BAK="$SCRIPT_DIR/trusted_networks.txt.testbak"
 RESOLV_BAK="/tmp/resolv.conf.testbak"
+HISTORY_TEST="/tmp/sentinel_score_history_test.txt"
 
 RED='\033[0;31m'
 GRN='\033[0;32m'
@@ -58,6 +59,7 @@ cleanup() {
     if [[ -n "${DNSMASQ_PID:-}" ]]; then
         kill "$DNSMASQ_PID" 2>/dev/null || true
     fi
+    rm -f "$HISTORY_TEST"
 }
 trap cleanup EXIT
 
@@ -265,6 +267,39 @@ test_dnssec() {
     fi
 }
 
+# ── Test: score history escalation ───────────────────────────────────────────
+test_score_history() {
+    local ssid bssid
+    ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2 || echo "UNKNOWN")
+    bssid=$(nmcli -f ACTIVE,BSSID dev wifi 2>/dev/null | awk '/^yes/ {print $2}' || echo "UNKNOWN")
+
+    if [[ "$ssid" == "UNKNOWN" || "$bssid" == "UNKNOWN" ]]; then
+        skip "Not connected to WiFi — cannot test score history"
+        TESTS_SKIPPED=$(( TESTS_SKIPPED + 1 ))
+        TESTS_RUN=$(( TESTS_RUN - 1 ))
+        return 0
+    fi
+
+    # Seed history with a previous clean score of 0 for the current network.
+    echo "$ssid|$bssid|$(date +%s)|0" > "$HISTORY_TEST"
+
+    # Mock nmap to produce a finding (telnet open) so the current scan scores > 0.
+    nmap() { echo "23/tcp open  telnet"; }
+    export -f nmap
+
+    local output
+    output=$(SCORE_HISTORY="$HISTORY_TEST" bash "$SENTINEL" 2>&1) || true
+    unset -f nmap
+
+    if echo "$output" | grep -q "Previously clean"; then
+        pass "Score history escalation correctly triggered"
+    else
+        fail "Expected score history escalation not found"
+        echo "$output"
+        return 1
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -278,6 +313,7 @@ run_test "DNS hijacking detection"      test_dns_hijack
 run_test "Gateway suspicious port scan" test_gateway_port_scan
 run_test "HTTPS downgrade detection"    test_https_downgrade
 run_test "DNSSEC validation"            test_dnssec
+run_test "Score history escalation"     test_score_history
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

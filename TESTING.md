@@ -21,6 +21,7 @@ Tests restore all state on exit (trusted_networks.txt, resolv.conf, background p
 | Gateway port fingerprint | Bash function mock via `export -f nmap` returning telnet | Yes |
 | HTTPS downgrade detection | Bash function mock via `export -f curl` returning 200 OK | Yes |
 | DNSSEC validation | Bash function mock via `export -f dig` returning response without AD flag | Yes |
+| Score history escalation | Seed history file with score=0, mock nmap to produce a finding, verify escalation warning | Yes |
 
 ---
 
