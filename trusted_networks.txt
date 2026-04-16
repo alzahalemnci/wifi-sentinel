@@ -4,3 +4,5 @@
 # MyPhone Hotspot
 # MyHomeWiFi
 # WorkNetwork
+ATT-WIFI-zc55|34:98:B5:6E:8A:7A
+Kings-Row|B8:F8:53:B0:75:48

@@ -12,12 +12,24 @@ sudo dnf     install -y openssl curl bind-utils nmap libnotify   2>/dev/null || 
 echo "  Install manually: openssl curl dig nmap notify-send"
 
 echo "[2/4] Copying files to $INSTALL_DIR..."
-sudo mkdir -p "$INSTALL_DIR"
-sudo cp "$SCRIPT_DIR/wifi-sentinel.sh" "$INSTALL_DIR/"
-sudo cp "$SCRIPT_DIR/dispatcher.sh"    "$INSTALL_DIR/"
+sudo mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/checks"
+sudo cp "$SCRIPT_DIR/wifi-sentinel.sh"  "$INSTALL_DIR/"
+sudo cp "$SCRIPT_DIR/dispatcher.sh"     "$INSTALL_DIR/"
+sudo cp "$SCRIPT_DIR/lib/"*.sh          "$INSTALL_DIR/lib/"
+sudo cp "$SCRIPT_DIR/checks/"*.sh       "$INSTALL_DIR/checks/"
 sudo chmod +x "$INSTALL_DIR/wifi-sentinel.sh"
 sudo chmod +x "$INSTALL_DIR/dispatcher.sh"
+sudo chown -R root:root "$INSTALL_DIR/lib" "$INSTALL_DIR/checks"
 sudo chown root:root "$INSTALL_DIR/wifi-sentinel.sh" "$INSTALL_DIR/dispatcher.sh"
+
+# sentinel.conf — copy if present, create from defaults if not; must be user-editable
+if [[ -f "$SCRIPT_DIR/sentinel.conf" ]]; then
+    sudo cp "$SCRIPT_DIR/sentinel.conf" "$INSTALL_DIR/"
+else
+    sudo touch "$INSTALL_DIR/sentinel.conf"
+fi
+sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/sentinel.conf"
+sudo chmod 664 "$INSTALL_DIR/sentinel.conf"
 
 # trusted_networks.txt — copy if present, create if not; must be user-editable
 if [[ -f "$SCRIPT_DIR/trusted_networks.txt" ]]; then
