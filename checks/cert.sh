@@ -51,6 +51,9 @@ check_tls_pinning() {
             alert "TLS INTERCEPTION DETECTED — google.com cert fails CA validation: ${reason:-code $verify_code}"
             RISK_SCORE=$((RISK_SCORE + 60))
             RISK_REASONS+=("TLS interception detected — certificate fails CA validation")
+            evidence_add "TLS Interception Detected" \
+                "A connection to google.com failed certificate validation against your system's trusted CA store. Someone is intercepting your HTTPS traffic and presenting their own certificate. Your encrypted traffic is being read and possibly modified." \
+                "  Verify return code : $verify_code\n  Reason            : ${reason:-unknown}"
             ;;
     esac
 }
@@ -82,6 +85,9 @@ check_https_downgrade() {
             alert "HTTPS DOWNGRADE DETECTED — http://google.com served 200 OK without redirecting to HTTPS"
             RISK_SCORE=$((RISK_SCORE + 40))
             RISK_REASONS+=("HTTPS downgrade — HTTP request served without TLS redirect")
+            evidence_add "HTTPS Downgrade Attack" \
+                "A plain HTTP request to google.com returned 200 OK instead of a redirect to HTTPS. An attacker is stripping TLS — they intercept your HTTP request before it can upgrade to HTTPS, allowing them to read and modify all traffic in plaintext." \
+                "  curl -sI http://google.com → HTTP/1.1 200 OK (expected 301 Moved Permanently)"
             ;;
         "")
             warn "HTTPS downgrade check skipped — could not reach google.com"

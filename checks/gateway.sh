@@ -73,6 +73,9 @@ _check_gateway_ports() {
         warn "Suspicious port open on gateway: $port_line — $label"
         RISK_SCORE=$((RISK_SCORE + score))
         RISK_REASONS+=("Gateway port $port open ($label)")
+        evidence_add "Suspicious Gateway Port: $label" \
+            "Port $port is open on your gateway ($gw). $label is not expected on a legitimate router and may indicate the device has been compromised or replaced with a rogue AP." \
+            "  nmap: $port_line"
     done <<< "$open_ports"
 }
 
@@ -99,6 +102,9 @@ check_gateway() {
             warn "Gateway MAC has no known vendor — could be a cheap/DIY AP"
             RISK_SCORE=$((RISK_SCORE + 20))
             RISK_REASONS+=("Unknown MAC vendor")
+            evidence_add "Unknown Gateway MAC Vendor" \
+                "The gateway MAC address ($GATEWAY_MAC) does not match any registered hardware manufacturer. Legitimate routers always have a registered OUI. An unrecognised vendor may indicate a rogue device acting as your gateway." \
+                "  MAC address : $GATEWAY_MAC\n  OUI lookup  : Unknown"
         else
             good "MAC vendor identified: $vendor"
         fi

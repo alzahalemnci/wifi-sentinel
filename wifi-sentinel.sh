@@ -13,6 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRUSTED_NETWORKS="${TRUSTED_NETWORKS:-$SCRIPT_DIR/trusted_networks.txt}"
 SCORE_HISTORY="${SCORE_HISTORY:-$SCRIPT_DIR/score_history.txt}"
+EVIDENCE_DIR="${EVIDENCE_DIR:-$SCRIPT_DIR/evidence}"
 LOG_FILE="$SCRIPT_DIR/sentinel.log"
 OUI_DB="$SCRIPT_DIR/oui.txt"   # optional local OUI db (see README)
 
@@ -174,6 +175,11 @@ main() {
 
     echo ""
     log "=== Scan end: SSID=$ssid  score=$RISK_SCORE  reasons=${RISK_REASONS[*]:-none} ==="
+
+    # Write evidence report for moderate and high risk scans.
+    if (( RISK_SCORE >= 30 )); then
+        evidence_dump "$ssid" "$bssid" "$RISK_SCORE"
+    fi
 }
 
 main "$@"

@@ -37,6 +37,9 @@ check_dns() {
         alert "DNS HIJACKING DETECTED — local DNS returns results for non-existent domains"
         RISK_SCORE=$((RISK_SCORE + 50))
         RISK_REASONS+=("DNS hijacking detected")
+        evidence_add "DNS Hijacking" \
+            "Your local DNS resolver returned an IP address for '$canary', a domain guaranteed not to exist. A legitimate resolver returns NXDOMAIN. Public resolvers confirmed NXDOMAIN, proving your local resolver is fabricating responses — used to redirect you to fake login pages or intercept credentials." \
+            "  Canary domain : $canary\n  Local result  : $local_result\n  8.8.8.8       : ${google_result:-(NXDOMAIN)}\n  1.1.1.1       : ${cf_result:-(NXDOMAIN)}"
     else
         # Even public resolvers returned something — canary domain may have been registered.
         # Inconclusive; log it but don't score.
@@ -77,5 +80,8 @@ check_dnssec() {
         info "  This may indicate a rogue resolver stripping DNSSEC, or simply a resolver that does not validate."
         RISK_SCORE=$((RISK_SCORE + 20))
         RISK_REASONS+=("DNSSEC not validated by local resolver")
+        evidence_add "DNSSEC Not Validated" \
+            "Your resolver did not set the AD (Authenticated Data) flag when querying a DNSSEC-signed domain. A resolver performing proper validation cryptographically verifies DNS responses — a rogue resolver cannot forge valid DNSSEC signatures and therefore strips this flag." \
+            "  dig +dnssec cloudflare.com — AD flag absent in flags field"
     fi
 }

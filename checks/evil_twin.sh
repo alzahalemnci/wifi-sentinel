@@ -28,6 +28,9 @@ check_evil_twin() {
         done <<< "$bssids"
         RISK_SCORE=$((RISK_SCORE + 15))
         RISK_REASONS+=("Multiple APs with same SSID ($count detected — could be mesh or evil twin)")
+        evidence_add "Multiple APs Broadcasting Same SSID" \
+            "Found $count devices broadcasting '$ssid'. While mesh networks do this legitimately, it is also how evil twin attacks work — a rogue AP copies your network name to intercept traffic. Compare the BSSIDs below against the label on your router." \
+            "$(echo "$bssids" | sed 's/^/  BSSID: /')"
     else
         good "Only one AP broadcasting '$ssid' — no evil twin detected"
     fi

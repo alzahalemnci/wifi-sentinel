@@ -14,6 +14,7 @@ TRUSTED="$SCRIPT_DIR/trusted_networks.txt"
 TRUSTED_BAK="$SCRIPT_DIR/trusted_networks.txt.testbak"
 RESOLV_BAK="/tmp/resolv.conf.testbak"
 HISTORY_TEST="/tmp/sentinel_score_history_test.txt"
+EVIDENCE_TEST="/tmp/sentinel_evidence_test"
 
 RED='\033[0;31m'
 GRN='\033[0;32m'
@@ -60,6 +61,7 @@ cleanup() {
         kill "$DNSMASQ_PID" 2>/dev/null || true
     fi
     rm -f "$HISTORY_TEST"
+    rm -rf "$EVIDENCE_TEST"
 }
 trap cleanup EXIT
 
@@ -381,6 +383,45 @@ test_silent_scan_notifies_on_risk() {
     fi
 }
 
+# ── Test: evidence dump written on high-risk scan ────────────────────────────
+test_evidence_dump() {
+    mkdir -p "$EVIDENCE_TEST"
+
+    # Mock dig to simulate DNS hijacking — confirmed finding, score +50 → triggers dump.
+    dig() {
+        local args="$*"
+        if [[ "$args" == *"@8.8.8.8"* ]] || [[ "$args" == *"@1.1.1.1"* ]]; then
+            echo ""
+        elif [[ "$args" == *"+dnssec"* ]]; then
+            echo ";; flags: qr rd ra ad;"
+        else
+            echo "1.2.3.4"
+        fi
+    }
+    export -f dig
+
+    local output
+    output=$(EVIDENCE_DIR="$EVIDENCE_TEST" bash "$SENTINEL" 2>&1) || true
+    unset -f dig
+
+    local report
+    report=$(ls "$EVIDENCE_TEST"/evidence_*.txt 2>/dev/null | head -1)
+
+    if [[ -z "$report" ]]; then
+        fail "Evidence report file not created"
+        echo "$output"
+        return 1
+    fi
+
+    if grep -q "DNS Hijacking" "$report"; then
+        pass "Evidence report created with correct finding"
+    else
+        fail "Evidence report missing expected finding"
+        cat "$report"
+        return 1
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -397,6 +438,7 @@ run_test "DNSSEC validation"                 test_dnssec
 run_test "Score history escalation"          test_score_history
 run_test "Silent scan (score 0, no change)"  test_silent_scan
 run_test "Silent scan notifies on risk > 0"  test_silent_scan_notifies_on_risk
+run_test "Evidence dump on high-risk scan"   test_evidence_dump
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

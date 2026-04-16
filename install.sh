@@ -56,6 +56,11 @@ sudo touch "$INSTALL_DIR/score_history.txt"
 sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/score_history.txt"
 sudo chmod 664 "$INSTALL_DIR/score_history.txt"
 
+# evidence/ — directory for human-readable finding reports on high-risk scans
+sudo mkdir -p "$INSTALL_DIR/evidence"
+sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/evidence"
+sudo chmod 775 "$INSTALL_DIR/evidence"
+
 echo "[3/4] Installing NetworkManager dispatcher..."
 sudo sed \
     -e "s|SENTINEL=.*|SENTINEL=\"$INSTALL_DIR/wifi-sentinel.sh\"|" \
