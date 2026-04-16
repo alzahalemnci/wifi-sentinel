@@ -154,8 +154,14 @@ test_dns_hijack() {
 
 # ── Test: clean network scores 0 ─────────────────────────────────────────────
 test_clean_scan() {
+    # Mock nmap to return no open ports so the score is deterministic regardless
+    # of what services are actually running on the test machine's gateway.
+    nmap() { echo ""; }
+    export -f nmap
+
     local output
-    output=$(bash "$SENTINEL" </dev/null 2>&1) || true
+    output=$(bash "$SENTINEL" 2>&1) || true
+    unset -f nmap
 
     if echo "$output" | grep -q "score=0"; then
         pass "Clean network scores 0"
@@ -169,16 +175,40 @@ test_clean_scan() {
     fi
 }
 
+# ── Test: suspicious gateway port ────────────────────────────────────────────
+test_gateway_port_scan() {
+    # Mock nmap to report telnet (port 23) open on the gateway.
+    # Exported bash functions are inherited by child bash processes via BASH_FUNC_*
+    # so no real nmap scan or root access is needed.
+    nmap() {
+        echo "23/tcp open  telnet"
+    }
+    export -f nmap
+
+    local output
+    output=$(bash "$SENTINEL" 2>&1) || true
+    unset -f nmap
+
+    if echo "$output" | grep -q "Telnet"; then
+        pass "Suspicious gateway port (telnet) correctly detected"
+    else
+        fail "Expected gateway port alert not found"
+        echo "$output"
+        return 1
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${CYN}  wifi-sentinel test suite${NC}"
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-run_test "Clean scan baseline"       test_clean_scan
-run_test "Trusted network skip"      test_trusted_skip
-run_test "Gateway MAC change alert"  test_gateway_mac_change
-run_test "DNS hijacking detection"   test_dns_hijack
+run_test "Clean scan baseline"          test_clean_scan
+run_test "Trusted network skip"         test_trusted_skip
+run_test "Gateway MAC change alert"     test_gateway_mac_change
+run_test "DNS hijacking detection"      test_dns_hijack
+run_test "Gateway suspicious port scan" test_gateway_port_scan
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

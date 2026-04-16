@@ -14,10 +14,11 @@ Tests restore all state on exit (trusted_networks.txt, resolv.conf, background p
 
 | Check | How simulated | Automated |
 |---|---|---|
-| Clean scan baseline | Current network | Yes |
+| Clean scan baseline | Current network (nmap mocked to return no ports) | Yes |
 | Trusted network skip | Inject fake entry into trusted_networks.txt | Yes |
 | Gateway MAC change | Inject wrong MAC into trusted_networks.txt | Yes |
-| DNS hijacking | dnsmasq returning IPs for all queries + /etc/resolv.conf redirect | Yes (requires `dnsmasq`) |
+| DNS hijacking | Bash function mock via `export -f dig` | Yes |
+| Gateway port fingerprint | Bash function mock via `export -f nmap` returning telnet | Yes |
 
 ---
 

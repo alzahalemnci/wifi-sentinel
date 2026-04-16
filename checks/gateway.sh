@@ -35,6 +35,47 @@ _oui_lookup() {
     fi
 }
 
+_check_gateway_ports() {
+    local gw="$1"
+
+    if ! command -v nmap &>/dev/null; then
+        warn "nmap not found — skipping gateway port scan"
+        return
+    fi
+
+    info "Scanning gateway for suspicious open ports ..."
+
+    # Ports that are normal on routers: 80, 443, 53 (not scanned here).
+    # Ports below are unexpected on a home/corp gateway and worth flagging.
+    local suspicious_ports="22,23,1080,3389,4444,5555,5900,8080,8888"
+    local open_ports
+    open_ports=$(nmap -T4 --open -p "$suspicious_ports" --host-timeout 10s "$gw" 2>/dev/null \
+        | grep -E '^[0-9]+/tcp' | awk '{print $1}' || true)
+
+    if [[ -z "$open_ports" ]]; then
+        good "No suspicious ports open on gateway"
+        return
+    fi
+
+    while IFS= read -r port_line; do
+        local port="${port_line%%/*}"
+        local score label
+        case "$port" in
+            23)        score=30; label="Telnet (cleartext remote access)" ;;
+            1080)      score=30; label="SOCKS proxy" ;;
+            4444|5555) score=25; label="Known C2/backdoor port ($port)" ;;
+            5900)      score=25; label="VNC (remote desktop on gateway)" ;;
+            3389)      score=25; label="RDP (remote desktop on gateway)" ;;
+            8080|8888) score=15; label="Non-standard HTTP proxy ($port)" ;;
+            22)        score=10; label="SSH (unusual on a home router)" ;;
+            *)         score=10; label="Unexpected service on port $port" ;;
+        esac
+        warn "Suspicious port open on gateway: $port_line — $label"
+        RISK_SCORE=$((RISK_SCORE + score))
+        RISK_REASONS+=("Gateway port $port open ($label)")
+    done <<< "$open_ports"
+}
+
 # Public entry point — called by the main orchestrator.
 # Returns 1 if the gateway cannot be determined (fatal, scan cannot continue).
 # Sets global GATEWAY_MAC so the orchestrator can store it in trusted_networks.txt.
@@ -62,4 +103,6 @@ check_gateway() {
             good "MAC vendor identified: $vendor"
         fi
     fi
+
+    _check_gateway_ports "$gateway"
 }
