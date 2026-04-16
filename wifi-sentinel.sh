@@ -92,7 +92,7 @@ main() {
     check_dns
     check_dnssec
 
-    # ── Score history escalation ──────────────────────────────────────────────
+    # ── Score history ─────────────────────────────────────────────────────────
     # Record raw score before escalation so history reflects actual check results.
     local last_score
     last_score=$(get_last_score "$ssid" "$bssid")
@@ -103,6 +103,17 @@ main() {
         RISK_REASONS+=("Previously clean — new anomalies detected since last visit")
     fi
 
+    # ── Silent scan logic ─────────────────────────────────────────────────────
+    # In dispatcher mode, suppress desktop notifications when the score hasn't
+    # increased since last visit — no point waking the user for a known baseline.
+    # First-time scans (no history) and any score increase always notify.
+    # Terminal mode always shows full output regardless.
+    local should_notify=true
+    if [[ ! -t 0 && -n "$last_score" && "$RISK_SCORE" -le "$last_score" ]]; then
+        should_notify=false
+        log "Silent scan — score=$RISK_SCORE last=$last_score — no change, notification suppressed"
+    fi
+
     # ── Verdict ───────────────────────────────────────────────────────────────
     echo ""
     echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -111,10 +122,10 @@ main() {
 
     # _trust_from_notification fires an interactive notification with an
     # "Add to Trusted" button. If clicked, adds the network to the trusted list.
-    # Used for all score levels in the dispatcher path so the user always has the
-    # option to trust regardless of score.
+    # Respects should_notify — suppressed on silent scans.
     _trust_from_notification() {
         local title="$1" body="$2" urgency="${3:-normal}"
+        "$should_notify" || return 0
         local action
         action=$(notify_interactive "$title" "$body" "$urgency")
         if [[ "$action" == "trust" && "$bssid" != "UNKNOWN" ]]; then
@@ -138,11 +149,10 @@ main() {
                     notify "Clean" "Network '$ssid' passed all checks." normal
                 fi
             else
-                # Dispatcher: offer trust button on the notification.
                 _trust_from_notification "Clean ✓" "Score 0 — Network '$ssid' passed all checks." normal
             fi
         else
-            notify "Clean" "Network '$ssid' passed all checks." normal
+            $should_notify && notify "Clean" "Network '$ssid' passed all checks." normal || true
         fi
     elif (( RISK_SCORE < 30 )); then
         warn "Low-risk anomalies found on '$ssid':"

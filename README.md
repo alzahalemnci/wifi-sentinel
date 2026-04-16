@@ -1,23 +1,40 @@
 # wifi-sentinel
 
-Automatic captive portal and rogue AP detector for Linux. Runs on every WiFi connect, scores the network for suspicious behaviour, and fires a desktop notification if something looks off.
+Automatic WiFi security scanner for Linux. Runs on every WiFi connect, scores the network for suspicious behaviour, and fires a desktop notification only when something changes or gets worse.
 
 ## What it checks
 
 | Check | Risk points |
 |---|---|
 | Gateway MAC has no known OUI vendor | +20 |
+| Suspicious port open on gateway (telnet, SOCKS, VNC, RDP, C2 ports…) | +10–30 |
+| Multiple APs broadcasting the same SSID (possible evil twin) | +15 |
+| TLS interception — google.com cert fails CA validation | +60 |
+| HTTPS downgrade — HTTP request served without redirect to HTTPS | +40 |
 | Captive portal with no retrievable certificate | +15 |
-| Self-signed certificate | +30 |
+| Self-signed certificate on captive portal | +30 |
 | Certificate issued to a raw IP address | +25 |
 | Expired certificate | +20 |
-| DNS hijacking (local results differ from 8.8.8.8) | +50 |
+| DNS hijacking — local resolver returns results for non-existent domains | +50 |
+| DNSSEC not validated by local resolver | +20 |
+| Previously clean network now shows anomalies | +20 |
 
 **Verdict thresholds:**
 - **0** — clean, all checks passed
 - **1–29** — low risk, probably lazy IT, use a VPN for anything sensitive
 - **30–59** — moderate risk, do not log in to anything
 - **60+** — high risk, possible evil-twin / rogue AP, disconnect immediately
+
+## Smart notification behaviour
+
+wifi-sentinel tracks scan scores in `score_history.txt`. When running automatically via the NetworkManager dispatcher:
+
+- **First time on a network** — full notification regardless of score
+- **Score unchanged or lower since last visit** — silent scan, result logged but no notification
+- **Score increased since last visit** — notification fires
+- **In trusted list** — scan skipped entirely (use this for networks you've accepted as-is)
+
+When run manually from a terminal, full output always prints regardless of history.
 
 ## Dependencies
 
@@ -37,7 +54,7 @@ Automatic captive portal and rogue AP detector for Linux. Runs on every WiFi con
 ```bash
 git clone https://github.com/alzahalemnci/wifi-sentinel.git
 cd wifi-sentinel
-bash install.sh
+sudo bash install.sh
 ```
 
 `install.sh` will:
@@ -64,33 +81,43 @@ bash wifi-sentinel.sh
 
 ## Configuration
 
-**Trusted networks** — edit `/opt/wifi-sentinel/trusted_networks.txt`, one SSID per line. The sentinel skips these entirely:
+Edit `/opt/wifi-sentinel/sentinel.conf`:
+
+```bash
+# Send desktop notifications (true/false)
+NOTIFY=${NOTIFY:-true}
+```
+
+**Trusted networks** — edit `/opt/wifi-sentinel/trusted_networks.txt`. The sentinel skips these entirely, suppressing all alerts even if something changes:
 
 ```
 MyHomeWiFi
 WorkNetwork
+MyHomeWiFi|AA:BB:CC:DD:EE:FF|11:22:33:44:55:66
 ```
 
-**Desktop notifications** — set `NOTIFY=false` at the top of `wifi-sentinel.sh` to disable them.
+Entries are added automatically when you click **Add to Trusted** on a notification, or you can add them manually in `SSID|BSSID|GATEWAY_MAC` format.
 
-**OUI database** — `install.sh` downloads this automatically. To refresh it manually after install:
+**OUI database** — `install.sh` downloads this automatically. To refresh it manually:
 
 ```bash
 sudo curl -o /opt/wifi-sentinel/oui.txt https://www.wireshark.org/download/automated/data/manuf
 ```
 
-`oui.txt` is gitignored — it's ~10 MB and user-generated.
+## Log files
 
-## Log file
-
-All scan results are written to `/opt/wifi-sentinel/sentinel.log`. Tail it live with:
+All scan results are written to `/opt/wifi-sentinel/sentinel.log`. Score history is in `score_history.txt`. Tail the log live with:
 
 ```bash
 tail -f /opt/wifi-sentinel/sentinel.log
 ```
 
-When running manually from the clone directory (before install), logs go to `sentinel.log` in that directory instead.
+When running manually from the clone directory (before install), both files go to that directory instead.
 
-## Captive portal investigation
+## Testing
 
-See [`captive_portal_investigation.md`](captive_portal_investigation.md) for a manual cheatsheet on inspecting suspicious portal certificates with `openssl` and `curl`.
+```bash
+bash test.sh
+```
+
+Runs 10 automated tests covering all major checks. Safe to run on a live machine — all state is restored on exit. See [`TESTING.md`](TESTING.md) for details and manual testing procedures.

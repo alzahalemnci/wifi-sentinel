@@ -300,20 +300,93 @@ test_score_history() {
     fi
 }
 
+# ── Test: silent scan (score unchanged, no notification) ──────────────────────
+test_silent_scan() {
+    local ssid bssid
+    ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2 || echo "UNKNOWN")
+    bssid=$(nmcli -f ACTIVE,BSSID dev wifi 2>/dev/null | awk '/^yes/ {print $2}' || echo "UNKNOWN")
+
+    if [[ "$ssid" == "UNKNOWN" || "$bssid" == "UNKNOWN" ]]; then
+        skip "Not connected to WiFi — cannot test silent scan"
+        TESTS_SKIPPED=$(( TESTS_SKIPPED + 1 ))
+        TESTS_RUN=$(( TESTS_RUN - 1 ))
+        return 0
+    fi
+
+    # Seed history with a high score so current score (0 with mocked clean checks)
+    # is lower — should trigger silent scan.
+    echo "$ssid|$bssid|$(date +%s)|99" > "$HISTORY_TEST"
+
+    nmap() { echo ""; }
+    export -f nmap
+    dig() {
+        [[ "$*" == *"+dnssec"* ]] && echo ";; flags: qr rd ra ad;" || command dig "$@"
+    }
+    export -f dig
+
+    local output
+    output=$(SCORE_HISTORY="$HISTORY_TEST" bash "$SENTINEL" 2>&1) || true
+    unset -f nmap
+    unset -f dig
+
+    if echo "$output" | grep -q "notification suppressed"; then
+        pass "Silent scan correctly suppressed notification on unchanged score"
+    else
+        fail "Expected silent scan suppression not found"
+        echo "$output"
+        return 1
+    fi
+}
+
+# ── Test: silent scan breaks on score increase ────────────────────────────────
+test_silent_scan_breaks_on_increase() {
+    local ssid bssid
+    ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2 || echo "UNKNOWN")
+    bssid=$(nmcli -f ACTIVE,BSSID dev wifi 2>/dev/null | awk '/^yes/ {print $2}' || echo "UNKNOWN")
+
+    if [[ "$ssid" == "UNKNOWN" || "$bssid" == "UNKNOWN" ]]; then
+        skip "Not connected to WiFi — cannot test silent scan break"
+        TESTS_SKIPPED=$(( TESTS_SKIPPED + 1 ))
+        TESTS_RUN=$(( TESTS_RUN - 1 ))
+        return 0
+    fi
+
+    # Seed history with score=0 — current scan will score >0 via telnet mock.
+    echo "$ssid|$bssid|$(date +%s)|0" > "$HISTORY_TEST"
+
+    nmap() { echo "23/tcp open  telnet"; }
+    export -f nmap
+
+    local output
+    output=$(SCORE_HISTORY="$HISTORY_TEST" bash "$SENTINEL" 2>&1) || true
+    unset -f nmap
+
+    # Notification suppression message must NOT appear — score increased so notify.
+    if echo "$output" | grep -q "notification suppressed"; then
+        fail "Silent scan incorrectly suppressed notification on score increase"
+        echo "$output"
+        return 1
+    else
+        pass "Silent scan correctly notifies when score increases"
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${CYN}  wifi-sentinel test suite${NC}"
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-run_test "Clean scan baseline"          test_clean_scan
-run_test "Trusted network skip"         test_trusted_skip
-run_test "Gateway MAC change alert"     test_gateway_mac_change
-run_test "DNS hijacking detection"      test_dns_hijack
-run_test "Gateway suspicious port scan" test_gateway_port_scan
-run_test "HTTPS downgrade detection"    test_https_downgrade
-run_test "DNSSEC validation"            test_dnssec
-run_test "Score history escalation"     test_score_history
+run_test "Clean scan baseline"               test_clean_scan
+run_test "Trusted network skip"              test_trusted_skip
+run_test "Gateway MAC change alert"          test_gateway_mac_change
+run_test "DNS hijacking detection"           test_dns_hijack
+run_test "Gateway suspicious port scan"      test_gateway_port_scan
+run_test "HTTPS downgrade detection"         test_https_downgrade
+run_test "DNSSEC validation"                 test_dnssec
+run_test "Score history escalation"          test_score_history
+run_test "Silent scan (no change)"           test_silent_scan
+run_test "Silent scan breaks on increase"    test_silent_scan_breaks_on_increase
 
 echo ""
 echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
