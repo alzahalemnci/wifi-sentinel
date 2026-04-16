@@ -302,16 +302,26 @@ main() {
 
     if (( RISK_SCORE == 0 )); then
         good "Network looks clean. No anomalies detected."
-        notify "Clean" "Network '$ssid' passed all checks." normal
-        # Only prompt when running interactively (not via dispatcher).
-        # [ -t 0 ] is true when stdin is a real terminal.
-        if [[ "$bssid" != "UNKNOWN" ]] && [ -t 0 ]; then
-            echo -e -n "\n${CYN}Add '$ssid' to trusted networks? [y/N] ${NC}"
-            read -r response
-            if [[ "$response" =~ ^[Yy]$ ]]; then
+        if [[ "$bssid" != "UNKNOWN" ]]; then
+            if [ -t 0 ]; then
+                # Interactive (manual run): ask before trusting.
+                echo -e -n "\n${CYN}Add '$ssid' to trusted networks? [y/N] ${NC}"
+                read -r response
+                if [[ "$response" =~ ^[Yy]$ ]]; then
+                    add_to_trusted "$ssid" "$bssid"
+                    good "Added '$ssid' ($bssid) to trusted networks."
+                    notify "Clean — Trusted" "Network '$ssid' passed all checks and was added to trusted list." normal
+                else
+                    notify "Clean" "Network '$ssid' passed all checks." normal
+                fi
+            else
+                # Dispatcher (no terminal): auto-trust and notify.
                 add_to_trusted "$ssid" "$bssid"
-                good "Added '$ssid' ($bssid) to trusted networks."
+                log "Auto-trusted '$ssid' ($bssid) after clean scan."
+                notify "Clean — Trusted" "Network '$ssid' passed all checks and was added to trusted list." normal
             fi
+        else
+            notify "Clean" "Network '$ssid' passed all checks." normal
         fi
     elif (( RISK_SCORE < 30 )); then
         warn "Low-risk anomalies found on '$ssid':"
