@@ -31,11 +31,18 @@ fi
 sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/sentinel.conf"
 sudo chmod 664 "$INSTALL_DIR/sentinel.conf"
 
-# trusted_networks.txt — copy if present, create if not; must be user-editable
-if [[ -f "$SCRIPT_DIR/trusted_networks.txt" ]]; then
-    sudo cp "$SCRIPT_DIR/trusted_networks.txt" "$INSTALL_DIR/"
-else
-    sudo touch "$INSTALL_DIR/trusted_networks.txt"
+# trusted_networks.txt — create with template comments if it doesn't exist yet.
+# Never overwrite an existing file — it contains the user's trusted entries.
+if [[ ! -f "$INSTALL_DIR/trusted_networks.txt" ]]; then
+    sudo tee "$INSTALL_DIR/trusted_networks.txt" > /dev/null << 'EOF'
+# One SSID per line — sentinel will skip these networks entirely.
+# Entries are added automatically when you click "Add to Trusted" on a notification.
+# To add manually, use the format: SSID|BSSID|GATEWAY_MAC
+# Examples:
+# MyHomeWiFi
+# WorkNetwork
+# MyHomeWiFi|AA:BB:CC:DD:EE:FF|11:22:33:44:55:66
+EOF
 fi
 sudo chown "root:$CURRENT_USER" "$INSTALL_DIR/trusted_networks.txt"
 sudo chmod 664 "$INSTALL_DIR/trusted_networks.txt"
