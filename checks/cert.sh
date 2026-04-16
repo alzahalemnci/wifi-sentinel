@@ -23,6 +23,38 @@ _fetch_cert() {
         -subject -issuer -dates -fingerprint 2>/dev/null || true
 }
 
+# Public entry point — checks for TLS interception by validating google.com's
+# certificate against the system CA bundle. A valid cert means no one is
+# intercepting TLS. A failed validation means a proxy is presenting its own cert,
+# which won't be trusted by the OS unless the attacker installed their CA — a
+# strong indicator of a MITM attack on public/home WiFi.
+check_tls_pinning() {
+    info "Checking for TLS interception ..."
+
+    local result verify_code
+    result=$(echo | timeout 10 openssl s_client \
+        -connect google.com:443 \
+        -servername google.com \
+        -verify 5 2>&1 || true)
+    verify_code=$(echo "$result" | grep "Verify return code" | awk '{print $4}')
+
+    case "$verify_code" in
+        0)
+            good "TLS certificate for google.com validates against system CA bundle"
+            ;;
+        "")
+            warn "TLS pinning check skipped — could not reach google.com (no internet yet?)"
+            ;;
+        *)
+            local reason
+            reason=$(echo "$result" | grep "Verify return code" | grep -oP '\(\K[^)]+' || true)
+            alert "TLS INTERCEPTION DETECTED — google.com cert fails CA validation: ${reason:-code $verify_code}"
+            RISK_SCORE=$((RISK_SCORE + 60))
+            RISK_REASONS+=("TLS interception detected — certificate fails CA validation")
+            ;;
+    esac
+}
+
 # Public entry point — called by the main orchestrator.
 check_portal() {
     local portal_url

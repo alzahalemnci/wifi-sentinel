@@ -15,19 +15,32 @@ check_dns() {
 
     # NXDOMAIN test: query a random domain that is guaranteed not to exist.
     # A legitimate DNS returns no answer (NXDOMAIN); a hijacking DNS returns an IP
-    # so it can redirect you to a search/ad page. This avoids false positives from
-    # CDN load balancing, where the same domain legitimately resolves to different
-    # IPs depending on which resolver you ask.
+    # so it can redirect you to a search/ad page.
     local canary="wifi-sentinel-canary-$(date +%s).invalid"
-    local hijack_result
-    hijack_result=$(dig +short +time=3 "$canary" 2>/dev/null | grep -v '^;' || true)
+    local local_result
+    local_result=$(dig +short +time=3 "$canary" 2>/dev/null | grep -v '^;' || true)
 
-    if [[ -n "$hijack_result" ]]; then
-        # Got an IP back for a non-existent domain — local DNS is redirecting queries.
-        alert "DNS HIJACKING DETECTED — local DNS is returning results for non-existent domains"
+    if [[ -z "$local_result" ]]; then
+        good "DNS is not being hijacked"
+        return
+    fi
+
+    # Local DNS returned something for a non-existent domain.
+    # Cross-check against two independent public resolvers to rule out the
+    # (extremely unlikely) case that someone actually registered our canary domain.
+    local google_result cf_result
+    google_result=$(dig +short +time=3 "$canary" @8.8.8.8  2>/dev/null | grep -v '^;' || true)
+    cf_result=$(dig +short     +time=3 "$canary" @1.1.1.1  2>/dev/null | grep -v '^;' || true)
+
+    if [[ -z "$google_result" && -z "$cf_result" ]]; then
+        # Public resolvers return NXDOMAIN, but local doesn't — confirmed hijack.
+        alert "DNS HIJACKING DETECTED — local DNS returns results for non-existent domains"
         RISK_SCORE=$((RISK_SCORE + 50))
         RISK_REASONS+=("DNS hijacking detected")
     else
-        good "DNS is not being hijacked"
+        # Even public resolvers returned something — canary domain may have been registered.
+        # Inconclusive; log it but don't score.
+        warn "Local DNS returned a result for canary domain, but public resolvers did too — inconclusive"
+        info "  Local: $local_result  |  8.8.8.8: $google_result  |  1.1.1.1: $cf_result"
     fi
 }

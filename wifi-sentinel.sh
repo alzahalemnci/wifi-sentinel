@@ -27,6 +27,7 @@ source "$SCRIPT_DIR/lib/trust.sh"
 source "$SCRIPT_DIR/checks/gateway.sh"
 source "$SCRIPT_DIR/checks/dns.sh"
 source "$SCRIPT_DIR/checks/cert.sh"
+source "$SCRIPT_DIR/checks/evil_twin.sh"
 
 # ── Network identity ──────────────────────────────────────────────────────────
 get_ssid() {
@@ -57,16 +58,34 @@ main() {
     echo -e "${CYN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     log "=== Scan start: SSID=$ssid BSSID=$bssid ==="
 
-    if is_trusted "$ssid" "$bssid"; then
-        good "Network '$ssid' is in your trusted list. Skipping."
-        exit 0
-    fi
-
     RISK_SCORE=0
-    RISK_REASONS=()  # array — entries are appended with +=("reason text")
+    RISK_REASONS=()
+    GATEWAY_MAC=""
+
+    if is_trusted "$ssid" "$bssid"; then
+        # Before skipping, verify the gateway MAC hasn't changed since we last trusted
+        # this network — a change could mean an evil twin is pretending to be it.
+        local gw gw_mac stored_mac
+        gw=$(_get_gateway)
+        gw_mac=$(_get_gateway_mac "$gw")
+        stored_mac=$(get_stored_gateway_mac "$ssid" "$bssid")
+
+        if [[ -n "$stored_mac" && -n "$gw_mac" && "${gw_mac^^}" != "${stored_mac^^}" ]]; then
+            alert "Gateway MAC changed on trusted network '$ssid' (was $stored_mac, now ${gw_mac^^})"
+            RISK_SCORE=$((RISK_SCORE + 40))
+            RISK_REASONS+=("Gateway MAC changed since last visit")
+            GATEWAY_MAC="$gw_mac"
+            # Fall through to full scan — do not skip
+        else
+            good "Network '$ssid' is in your trusted list. Skipping."
+            exit 0
+        fi
+    fi
 
     # ── Run checks ────────────────────────────────────────────────────────────
     check_gateway || exit 1   # fatal if no gateway — nothing else can run
+    check_evil_twin "$ssid"
+    check_tls_pinning
     check_portal
     check_dns
 
@@ -84,7 +103,7 @@ main() {
                 echo -e -n "\n${CYN}Add '$ssid' to trusted networks? [y/N] ${NC}"
                 read -r response
                 if [[ "$response" =~ ^[Yy]$ ]]; then
-                    add_to_trusted "$ssid" "$bssid"
+                    add_to_trusted "$ssid" "$bssid" "${GATEWAY_MAC:-}"
                     good "Added '$ssid' ($bssid) to trusted networks."
                     notify "Clean — Trusted" "Network '$ssid' passed all checks and was added to trusted list." normal
                 else
@@ -92,7 +111,7 @@ main() {
                 fi
             elif [[ "$AUTO_TRUST" == "true" ]]; then
                 # Dispatcher (no terminal): auto-trust if enabled in sentinel.conf.
-                add_to_trusted "$ssid" "$bssid"
+                add_to_trusted "$ssid" "$bssid" "${GATEWAY_MAC:-}"
                 log "Auto-trusted '$ssid' ($bssid) after clean scan."
                 notify "Clean — Trusted" "Network '$ssid' passed all checks and was added to trusted list." normal
             else

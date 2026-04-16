@@ -37,8 +37,9 @@ _oui_lookup() {
 
 # Public entry point — called by the main orchestrator.
 # Returns 1 if the gateway cannot be determined (fatal, scan cannot continue).
+# Sets global GATEWAY_MAC so the orchestrator can store it in trusted_networks.txt.
 check_gateway() {
-    local gateway mac vendor
+    local gateway vendor
     gateway=$(_get_gateway)
     if [[ -z "$gateway" ]]; then
         warn "Could not determine default gateway."
@@ -46,11 +47,12 @@ check_gateway() {
     fi
     info "Gateway: $gateway"
 
-    mac=$(_get_gateway_mac "$gateway")
-    info "Gateway MAC: ${mac:-not found}"
+    # GATEWAY_MAC is a global so main() can pass it to add_to_trusted().
+    GATEWAY_MAC=$(_get_gateway_mac "$gateway")
+    info "Gateway MAC: ${GATEWAY_MAC:-not found}"
 
-    if [[ -n "$mac" ]]; then
-        vendor=$(_oui_lookup "$mac")
+    if [[ -n "$GATEWAY_MAC" ]]; then
+        vendor=$(_oui_lookup "$GATEWAY_MAC")
         info "OUI Vendor: ${vendor:-unknown}"
         if [[ -z "$vendor" || "$vendor" == "Unknown" ]]; then
             warn "Gateway MAC has no known vendor — could be a cheap/DIY AP"
